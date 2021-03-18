@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # Build the latest PlantUML from source so we can test against it.
+  #
+  # We tried having the "plantuml" repo build snapshots and store them in GitHub Packages for later use here but the GITHUB_TOKEN in
+  # "plantuml-test" builds does not have read access to the snapshots and there is currently no anonymous access, see
+  # https://github.community/t/download-from-github-package-registry-without-authentication/14407/85
+  #
+  # A Personal Access Token would in theory solve the access problem but it seems marginally simpler just to build PlantUML in here.
+  build_plantuml:
+    name: Build PlantUML
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          repository: plantuml/plantuml
+
+      - name: Setup Java
+        uses: actions/setup-java@v1.4.3
+        with:
+          java-version: 8
+
+      - name: Cache Maven Dependencies
+        uses: actions/cache@v2
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      # Downloading all the dependencies is very log spammy so we do this in its own step
+      - name: Download Maven Dependencies
+        run: mvn --batch-mode dependency:go-offline
+
+      - name: Get Version
+        id: version
+        run: echo "::set-output name=version::$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)"
+
+      - name: Build
+        run: |
+          mvn --batch-mode install \
+            -Dmaven.javadoc.skip=true \
+            -Dmaven.source.skip=true \
+            -Dmaven.test.skip=true
+
+      - name: Upload Repo Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: plantuml-maven-repo
+          path: ~/.m2/repository/net/sourceforge/plantuml/plantuml/
+
+  run_tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: build_plantuml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # "apt-get update" is necessary because we are doing "apt-get install"
+      # Maybe in future it will not be necessary, see https://github.com/actions/virtual-environments/issues/2924
+      - name: APT Update
+        run: sudo apt-get update
+
+      - name: Install Graphviz
+        run:  sudo apt-get install -y --no-install-recommends graphviz
+
+      - name: Setup Java
+        uses: actions/setup-java@v1.4.3
+        with:
+          java-version: 8
+
+      - name: Cache Maven Dependencies
+        uses: actions/cache@v2
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Download PlantUML Repo Artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: plantuml-maven-repo
+          path: ~/.m2/repository/net/sourceforge/plantuml/plantuml/
+
+      # Downloading all the dependencies is very log spammy so we do this in its own step
+      - name: Download Maven Dependencies
+        run: ./mvnw --batch-mode dependency:go-offline
+
+      - name: Test
+        run: ./mvnw --batch-mode test -Dplantuml.version=${{ needs.build_plantuml.outputs.version }}

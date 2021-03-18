@@ -1,0 +1,18 @@
+# http://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 4
+indent_style = tab
+insert_final_newline = true
+max_line_length = 140
+trim_trailing_whitespace = true
+
+# These should work with IntelliJ >= 2021.1 (https://youtrack.jetbrains.com/issue/IDEA-225733)
+ij_java_class_count_to_use_import_on_demand = 999
+ij_java_names_count_to_use_import_on_demand = 999
+
+[*.yml]
+indent_size = 2
